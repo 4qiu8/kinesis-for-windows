@@ -1,6 +1,6 @@
-from cryptography.hazmat.primitives.asymmetric import rsa
-from pymobiledevice3.cli.remote import get_device_list
-from pymobiledevice3.remote.core_device_tunnel_service import create_core_device_tunnel_service
+from pymobiledevice3.cli.remote import install_driver_if_required, get_device_list
+from pymobiledevice3.remote.module_imports import start_tunnel
+from pymobiledevice3.remote.module_imports import verify_tunnel_imports
 from pymobiledevice3.remote.remote_service_discovery import RemoteServiceDiscoveryService
 from pymobiledevice3.services.dvt.dvt_secure_socket_proxy import DvtSecureSocketProxyService
 from pymobiledevice3.services.dvt.instruments.location_simulation import LocationSimulation
@@ -33,11 +33,11 @@ def server(tunnel_host, tunnel_port):
     @sio.event
     def location(sid, data):
         la, lo = list(map(lambda x: float(x), data.split(',')))
-        clients[sid][1].simulate_location(la, lo)
+        clients[sid][1].set(la, lo)
 
     @sio.event
     def disconnect(sid):
-        clients[sid][1].stop()
+        clients[sid][1].clear()
         clients[sid][0].service.close()
         clients.pop(sid)
 
@@ -48,23 +48,27 @@ def server(tunnel_host, tunnel_port):
 
 
 async def start_quic_tunnel(service_provider: RemoteServiceDiscoveryService) -> None:
-    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    with create_core_device_tunnel_service(service_provider, autopair=True) as service:
-        async with service.start_quic_tunnel(private_key) as tunnel_result:
-            print('UDID:', service_provider.udid)
-            print('ProductType:', service_provider.product_type)
-            print('ProductVersion:', service_provider.product_version)
-            print('Interface:', tunnel_result.interface)
-            print('--rsd', tunnel_result.address, tunnel_result.port)
+    if start_tunnel is None:
+        raise NotImplementedError('failed to start the QUIC tunnel on your platform')
+    async with start_tunnel(service_provider) as tunnel_result:
+        print('UDID:', service_provider.udid)
+        print('ProductType:', service_provider.product_type)
+        print('ProductVersion:', service_provider.product_version)
+        print('Interface:', tunnel_result.interface)
+        print('--rsd', tunnel_result.address, tunnel_result.port)
 
-            ui = Process(target=server, args=(tunnel_result.address, tunnel_result.port))
-            ui.start()
+        ui = Process(target=server, args=(tunnel_result.address, tunnel_result.port))
+        ui.start()
 
-            while True:
-                await asyncio.sleep(.5)
+        while True:
+            await asyncio.sleep(.5)
 
 
 def create_tunnel():
+    """ start quic tunnel """
+    install_driver_if_required()
+    if not verify_tunnel_imports():
+        return
     devices = get_device_list()
     if not devices:
         # no devices were found
