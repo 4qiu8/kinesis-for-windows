@@ -4,6 +4,9 @@ from pymobiledevice3.remote.module_imports import verify_tunnel_imports
 from pymobiledevice3.remote.remote_service_discovery import RemoteServiceDiscoveryService
 from pymobiledevice3.services.dvt.dvt_secure_socket_proxy import DvtSecureSocketProxyService
 from pymobiledevice3.services.dvt.instruments.location_simulation import LocationSimulation
+from pymobiledevice3.services.amfi import AmfiService
+from pymobiledevice3.lockdown import create_using_usbmux
+from pymobiledevice3.exceptions import AmfiError, DeveloperModeIsNotEnabledError
 
 import asyncio
 import eventlet
@@ -79,6 +82,16 @@ def create_tunnel():
     else:
         # several devices were found
         raise Exception('TooManyDevicesConnectedError')
+    
+    lockdown = create_using_usbmux(rsd.udid)
+    if not lockdown.developer_mode_status:
+        service = lockdown.start_lockdown_service(AmfiService.SERVICE_NAME)
+        resp = service.send_recv_plist({'action': 0})
+        error = resp.get('Error')
+        if error is not None:
+            raise AmfiError(error)
+        print('')
+        raise DeveloperModeIsNotEnabledError('need to enable developer mode toggle')
 
     asyncio.run(start_quic_tunnel(rsd))
 
